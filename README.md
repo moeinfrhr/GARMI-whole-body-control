@@ -25,3 +25,19 @@ D_task_orientation = 4; % Damping for orientation components
 % Including both translation and orientation components
 K_task = diag([repmat(K_task_translation, 1, 3), repmat(K_task_orientation, 1, 3)]);
 D_task = diag([repmat(D_task_translation, 1, 3), repmat(D_task_orientation, 1, 3)]);
+
+### Adjusting Null Space Behavior
+
+To adjust the null space behavior, change the parameters within the wholeBodyController Matlab function as shown below:
+
+% Base gains
+K_null_base = 10; % Gain for the base
+D_null_base = 45; % Damping for the base
+
+% Right arm gains
+K_null_right_arm = 1; % Example value, adjust as needed
+D_null_right_arm = 1; % Example value, adjust as needed
+
+% Left arm gains
+K_null_left_arm = 1; % Example value, adjust as needed (can be different from right arm if desired)
+D_null_left_arm = 1; % Example value, adjust as needed (can be different from right arm if desired)
