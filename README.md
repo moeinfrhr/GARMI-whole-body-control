@@ -25,7 +25,3 @@ D_task_orientation = 4; % Damping for orientation components
 % Including both translation and orientation components
 K_task = diag([repmat(K_task_translation, 1, 3), repmat(K_task_orientation, 1, 3)]);
 D_task = diag([repmat(D_task_translation, 1, 3), repmat(D_task_orientation, 1, 3)]);
-
-
-
-
