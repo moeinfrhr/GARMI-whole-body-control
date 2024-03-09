@@ -5,7 +5,7 @@ Whole body torque controller for a diff derive mobile service robot called GARMI
 
 ### How to Run Simulation
 
-1. Run `garmi_whole_body_control` script to start the whole body control simulation.
+1. Run `garmi_whole_body_control` to start the whole body control simulation.
 2. Execute `animate-simulation` to visualize the simulation.
 
 ### Adjusting Task Space Impedance Behavior
