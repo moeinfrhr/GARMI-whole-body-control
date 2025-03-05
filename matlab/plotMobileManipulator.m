@@ -1,4 +1,4 @@
-function position_end_effector = plotMobileManipulator(pose, q_right_arm, q_left_arm)
+function position_end_effector = plotMobileManipulator(pose, q_right_arm, q_left_arm, poseTable)
 
 % qhome_right = [0.942613,-1.37299,-0.0288793,-1.84589,0.131607,1.92806,-0.40];
 % qhome_left = [-0.942613,-1.37299,-0.0288793,-1.84589,-0.131607,1.92806,0.40];
@@ -25,6 +25,10 @@ spineOffset = 0.1;
 
 % Shoulder width along the X-axis
 shoulderWidth = 0.4;
+
+% Table parameters
+widthTable = 0.4;
+lengthTable = 0.8;
 
 % --- Color Settings ---
 wheelColor = [1, 0.75, 0]; % Orange
@@ -65,16 +69,22 @@ scatter3(origin_pos(1),origin_pos(2),origin_pos(3), 'filled', 'MarkerFaceColor',
 % plotting the local frame
 plotXYZCoordinate([x,y,0],theta,'B', axisLength);  % ploting the local frame
 
+% ploting the table
+plotTable(poseTable,lengthTable,widthTable,1.0);
+poseTableFixed = [1.20;0.0;1.0];
+plotTable(poseTableFixed,lengthTable,widthTable,0.1);
+
 % Plot the base with rotation and translation applied
 plotBase(x, y, theta, vertices, edges, cuboidColor);
 
 %make auxilary arrows for kinematic representation at inital posture. 
-% quiver3(origin_pos(1),origin_pos(2),origin_pos(3), x-origin_pos(1),y-origin_pos(2),-origin_pos(3), 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.4, 'AutoScale', 'off');
-% text(-0.35, 0.0, 0.0, '${}^A r_{p}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
-% quiver3(x, y, 0, 0.46405, -0.2941042, 1.1246555, 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.3, 'AutoScale', 'off');
-% text(0.35, 0.0, 0.6, '${}^A r_{i/B}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
-% quiver3(origin_pos(1),origin_pos(2),origin_pos(3), 0.46405-origin_pos(1),-0.2941042-origin_pos(2),1.1246555-origin_pos(3), 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.3, 'AutoScale', 'off');
-% text(0.35, 0.0, 1, '${}^A r_{i/A}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
+quiver3(origin_pos(1),origin_pos(2),origin_pos(3), x-origin_pos(1),y-origin_pos(2),-origin_pos(3), 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.4, 'AutoScale', 'off');
+text(-0.35, 0.0, 0.0, '${}^A r_{p}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
+quiver3(x, y, 0, 0.43745, 0.2522, 1.1055, 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.3, 'AutoScale', 'off');
+text(0.35, 0.0, 0.6, '${}^A r_{i/B}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
+quiver3(origin_pos(1),origin_pos(2),origin_pos(3), 0.43745-origin_pos(1),0.2522-origin_pos(2),1.1055-origin_pos(3), 'Color', [.8, 0.5, 0.5], 'LineWidth', 2, 'MaxHeadSize', 0.3, 'AutoScale', 'off');
+text(0.35, 0.0, 1, '${}^A r_{i/A}$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
+text(0.433, -0.4, 1.25, '$i$', 'FontSize', 16, 'Color', [.8, 0.5, 0.5], 'Interpreter', 'latex');
 
 % Calculate and plot wheels and axle holes with adjustments for pose
 plotWheelsAndAxles(x, y, theta, wheelCenters, wheelRadius, axleHoleRadius,wheelColor);
@@ -88,7 +98,8 @@ position_end_effector(1:3) = plotArmChain(x, y, theta, isRightArm,q_right_arm, r
 position_end_effector(4:6) = plotArmChain(x, y, theta,~isRightArm,q_left_arm, leftShoulderPose, armColorLeft); % Green for Left arm
 
 % --- Plotting Commands ---
-view(3);
+%view(3);
+view(160,20)
 % field_size = [-0.5 1.5 -1 2 -0.1 2];
 % axis(field_size);
 axis equal; % Locks the axis limits to the specified range
@@ -97,7 +108,6 @@ xlabel('X');
 ylabel('Y');
 zlabel('Z');
 grid on;
-hold off;
 
 end
 
@@ -298,6 +308,39 @@ xlabel(x_label, 'Interpreter', 'latex');
 ylabel(y_label, 'Interpreter', 'latex');
 zlabel(z_label, 'Interpreter', 'latex');
 end
+
+function plotTable(p, w, l, transparency)
+% plotTable - Plots a rectangular table centered at a specified position in 3D space.
+%
+% Syntax: plotTable(p, w, l, transparency)
+%
+% Inputs:
+%   p - A 1x3 vector specifying the XYZ coordinates of the center of the table.
+%   w - The width of the table.
+%   l - The length of the table.
+%   transparency - A scalar between 0 and 1 specifying the table's transparency.
+%
+% Example:
+%   plotTable([1, 2, 0], 4, 6, 0.5);
+
+    % Extract the center position
+    x = p(1);
+    y = p(2);
+    z = p(3);
+
+    % Calculate the rectangle's corner points
+    half_w = w / 2;
+    half_l = l / 2;
+
+    % Rectangle vertices (clockwise order)
+    rectX = [x - half_l, x + half_l, x + half_l, x - half_l];
+    rectY = [y - half_w, y - half_w, y + half_w, y + half_w];
+    rectZ = z * ones(1, 4); % Table lies in the same Z-plane
+
+    % Plot the filled table surface
+    fill3(rectX, rectY, rectZ, 'c', 'FaceAlpha', transparency, 'EdgeColor', 'b', 'LineWidth', 2);
+end
+
 
 
 

@@ -14,8 +14,10 @@ typedef Matrix<double, 9, 1> Vector9d;
 typedef Matrix<double, 7, 1> Vector7d;
 
 struct ControlOutput {
-    VectorXd tau_wb;  // torque control output
+    VectorXd tauR_wb;  // torque control output
     VectorXd v_wb; // velocity control output -- admittance
+    VectorXd tauR_ext;
+    VectorXd F_ext; // External force disturbance on the endeffector
 };
 
 // Function Declarations
@@ -35,7 +37,7 @@ void computeDynamics(const VectorXd& Q, const VectorXd& Qdot, MatrixXd& M, Matri
 double calculateDistance(const MatrixXd& link1, const MatrixXd& link2);
 
 VectorXd CollisionAvoidanceDistances(const Eigen::VectorXd& Q, bool isRightArm);
-VectorXd ManipulabilityGradient(const Eigen::VectorXd& Q, bool isRightArm);
+VectorXd SingularityAvoidanceGradient(const Eigen::VectorXd& Q, bool isRightArm);
 VectorXd JointLimitPotentialGradient(const Eigen::VectorXd& Q, bool isRightArm);
 VectorXd CollisionAvoidanceGradient(const Eigen::VectorXd& Q, const bool isRightArm);
 
@@ -43,7 +45,7 @@ VectorXd refAdmitanceCalc(const VectorXd& wrench_base, const VectorXd& pose_base
 VectorXd poseNonHolonomic(const VectorXd& pose_base, const VectorXd& twist_base);
 VectorXd poseErrorWithRotation(const VectorXd& pose_base_ref, const VectorXd& pose_base);
 VectorXd baseController(const VectorXd& twist_base_ref, const VectorXd& e_rotated);
-ControlOutput wholeBodyController(const VectorXd& X_task, const VectorXd& Q_null,  const VectorXd& Q, const VectorXd& Qdot, double currentTime);
+ControlOutput wholeBodyController(const VectorXd& X_task, const VectorXd& Q_null, const VectorXd& F_d, const VectorXd& delta_frc, const VectorXd& Q, const VectorXd& Qdot, const VectorXd& tau_mes, double currentTime, double ratioStiffnessTask, double ratioDampingTask, double ratioStiffnessNull, double ratioDampingNull);
 // Eigen::Vector2d DiffDriveVelocity(const Eigen::VectorXd& pose_baseurr, const Eigen::VectorXd& p_goal);
 // Eigen::Vector3d dubins_instantaneous_velocity(Eigen::Vector3d& base_pose_init, Eigen::Vector3d& base_pose_goal);
 

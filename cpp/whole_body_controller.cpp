@@ -98,7 +98,7 @@ namespace arm_control
         sub_relative_ = node_handle.subscribe<geometry_msgs::PoseStamped>("displacement", 1, update_relative_target);
 
         // ROS subscriber for garmi_joint_postion and garmi_joint_torque
-        // exoJointStateSub = node_handle.subscribe<sensor_msgs::JointState>("exo_joint_states", 10, update_target);
+        // exoLeftJointStateSub = node_handle.subscribe<sensor_msgs::JointState>("exo_joint_states", 10, update_target);
 
         // ROS publisher for exo_joint_position
 
@@ -246,19 +246,9 @@ namespace arm_control
     {
         mutex_.lock();
         franka::RobotState robot_state = arm.state_handle_->getRobotState();
-        std::array<double, 7> coriolis_array = arm.model_handle_->getCoriolis();
-
-        Eigen::Map<Eigen::Matrix<double, 7, 1>> coriolis(coriolis_array.data());
-        Eigen::Map<Eigen::Matrix<double, 7, 1>> q(robot_state.q.data());
-        Eigen::Map<Eigen::Matrix<double, 7, 1>> dq(robot_state.dq.data());
         Eigen::Map<Eigen::Matrix<double, 7, 1>> tau_J_d(robot_state.tau_J_d.data());
 
         Eigen::VectorXd tau_task(7), tau_nullspace(7), tau_joint_limits(7), tau_d(7);
-
-        // Set gains for the joint impedance control.
-        // Stiffness
-        const std::array<double, 7> k_gains = {{600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 100.0}};
-        const std::array<double, 7> d_gains = {{sqrt(k_gains[0]), sqrt(k_gains[1]), sqrt(k_gains[2]), sqrt(k_gains[3]), sqrt(k_gains[4]), sqrt(k_gains[5]), sqrt(k_gains[6])}};
 
         tau_d << arm.tau_d_;
 

@@ -3,10 +3,14 @@
 #include <arm_control/whole_body_controller.h>
 #include <alpine_msgs/DualTaskSpaceConfig.h>
 #include <alpine_msgs/DualPose.h>
+#include <alpine_msgs/OdomAndJoints.h>
+#include <alpine_msgs/DualTwist.h>
+
 #include <sensor_msgs/JointState.h>
 #include <geometry_msgs/Twist.h>
+#include "std_msgs/Float64.h"
 #include <nav_msgs/Odometry.h>
-#include "../src/redundancy_resolution/recorder.cpp"
+#include "../src/redundancy_resolution/recorder.h"
 #include <arm_control/moein_helpers/redundancy_resolution.h>
 
 namespace arm_control
@@ -27,15 +31,27 @@ namespace arm_control
 
     protected:
         // define control/trajectory variables
-        VectorXd tau_wb;
+        VectorXd tauR_wb;
         VectorXd X, X_task;
         VectorXd X_init;
-        VectorXd X_home;
+        VectorXd X_home,X_goal;
+        VectorXd X_taskSub;
+        VectorXd Q_nullSub;
         VectorXd q_home_right, q_home_left;
+        VectorXd q_grasping_right, q_grasping_left, q_towel_right, q_handover_right, q_post_handover_right, q_get_my_hand_right, q_get_my_hand_left;
         VectorXd Q, Qdot, Q_null, Q_home;  // define generalized coordinate
+        VectorXd tau_mes;  // define whole body measured torques
+        VectorXd tauR_ext;
+        VectorXd delta_frc;
+        VectorXd F_taskSub;
+        VectorXd F_ext;
         Vector3d pose_base;
         Vector3d twist_base;
         VectorXd subscribe_arm_wrench_;
+        double ratioStiffnessTask;
+        double ratioDampingTask;
+        double ratioStiffnessNull;
+        double ratioDampingNull;
         
         std::string arm_id_left_, arm_id_right_;
         double manipulability_right;
@@ -49,6 +65,7 @@ namespace arm_control
         bool data_saved;
         bool running;
         bool first_time;
+        bool garmi_user_stopped;
         double counter;
         double last_counter;
         double frequency;
@@ -59,6 +76,7 @@ namespace arm_control
         ControlOutput wbControllerOutput;
 
         double homing_duration;
+        double timeSinceHoming;
         double record_time;
         double SampletimeInit;
         int NODataRec;
@@ -73,17 +91,28 @@ namespace arm_control
         
         // define publishers
         ros::Publisher garmiCmdVelPub_;
+        ros::Publisher handRPub;
+        ros::Publisher handLPub;
+        ros::Publisher garmiTaskSpacePub;
+        ros::Publisher garmiNullSpacePub;
+
         ros::Subscriber garmiBaseStateSub;
         ros::Subscriber sub_right_arm;
         ros::Subscriber sub_left_arm;
+        ros::Subscriber garmiTaskSpaceSub;
+        ros::Subscriber garmiNullSpaceSub;
+        ros::Subscriber exoTimeSub;
+        
         // Creating a geometry_msgs/Twist message
         geometry_msgs::Twist cmd_vel_msg;
         nav_msgs::Odometry base_odom;
+        std_msgs::Float64 rightHandStatus;
+        std_msgs::Float64 leftHandStatus;
         Eigen::VectorXd subscribe_base_pose_;
         Eigen::VectorXd subscribe_base_twist_;
+        alpine_msgs::DualTwist task_space_state_msg;
+        alpine_msgs::OdomAndJoints null_space_state_msg;
         Recorder rec;
-        Eigen::Matrix<double, 7, 1> zero_q_;
-
     };
 
 } // namespace arm_control

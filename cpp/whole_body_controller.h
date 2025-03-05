@@ -116,9 +116,6 @@ protected:
     std::vector<double> lower_joint_limits_, upper_joint_limits_;
     ros::Subscriber sub_;
     ros::Subscriber sub_relative_;
-
-    ros::Subscriber exoJointStateSub;
-    ros::Subscriber exoTimeSub;
     std::mutex mutex_;
 
 private:

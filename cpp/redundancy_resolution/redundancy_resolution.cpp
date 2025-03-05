@@ -1,6 +1,8 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include <cmath>
+#include <ncurses.h>
+#include <algorithm>
 
 extern "C" {
 #include <arm_control/moein_helpers/openGJK.h>
@@ -297,10 +299,11 @@ MatrixXd JacobianWholeBody_cg(const VectorXd& Q, int index, bool isRightArm) {
 void computeDynamics(const VectorXd& Q, const VectorXd& Qdot, MatrixXd& M, MatrixXd& C, VectorXd& G) {
     // Dynamic parameters
     Vector3d g(0, 0, -9.81);
+    double payloadMass = 0.77;
 
     // Updated mass for each link using VectorXd
     VectorXd linkMasses(7);
-    linkMasses << 4.07, 5.996, 0.570, 3.083, 3.616, 1.435, 0.453;
+    linkMasses << 4.07, 5.996, 0.570, 3.083, 3.616, 1.435, 0.453 + payloadMass;
 
     // Initialize inertia matrices for each link, approximated and written inline
     MatrixXd linkInertia(3, 21);
@@ -315,7 +318,7 @@ void computeDynamics(const VectorXd& Q, const VectorXd& Qdot, MatrixXd& M, Matri
 
     // Mass and Inertia parameters for mobile base
     MatrixXd baseMass = MatrixXd::Zero(3, 3);
-    baseMass.diagonal() << 50, 50, 15; // Set the diagonal elements to 10, 10, and 3
+    baseMass.diagonal() << 50, 50, 25; // Set the diagonal elements to 50, 50, and 25
 
     // Initialize matrices M, C, and G
     M = MatrixXd::Zero(17, 17);
@@ -421,7 +424,7 @@ VectorXd CollisionAvoidanceDistances(const VectorXd& Q, bool isRightArm) {
 }
 
 // Function to compute the gradient of manipulability 
-VectorXd ManipulabilityGradient(const VectorXd& Q, bool isRightArm) {
+VectorXd SingularityAvoidanceGradient(const VectorXd& Q, bool isRightArm) {
     double epsilon = 1e-6; 
     double k_manipulability = 20;    // gain for the manipulability torque --- avoid high values
     VectorXd gradient(7);
@@ -627,91 +630,84 @@ VectorXd baseController(const VectorXd& twist_base_ref, const VectorXd& e_rotate
     return u;
 }
 
-ControlOutput wholeBodyController(const VectorXd& X_task, const VectorXd& Q_null, const VectorXd& Q, const VectorXd& Qdot, double currentTime)
+ControlOutput wholeBodyController(const VectorXd& X_task, const VectorXd& Q_null, const VectorXd& F_d, const VectorXd& delta_frc, const VectorXd& Q, const VectorXd& Qdot, const VectorXd& tau_mes, double currentTime, double ratioStiffnessTask, double ratioDampingTask, double ratioStiffnessNull, double ratioDampingNull)
 {
-    // Control parameters for task space
+    // Define control parameters for task space
     // Right arm control parameters
-    double K_right_arm_translation = 625.0; // Stiffness for translation components of right arm
-    double K_right_arm_orientation = 9.0; // Stiffness for orientation components of right arm
-    double D_right_arm_translation = 50.0; // Damping for translation components of right arm
-    double D_right_arm_orientation = 6.0; // Damping for orientation components of right arm
+    double K_right_arm_translation = ratioStiffnessTask * 400; // Stiffness for translation components of right arm (default: 625)
+    double K_right_arm_orientation = 16.0; // Stiffness for orientation components of right arm (default: 9.0)
+    double D_right_arm_translation = ratioDampingTask * 50.0; // Damping for translation components of right arm (default: 50.0)
+    double D_right_arm_orientation = 8.0; // Damping for orientation components of right arm (default: 6.0)
 
     // Left arm control parameters
-    double K_left_arm_translation = 625.0; // Stiffness for translation components of left arm
-    double K_left_arm_orientation = 9.0; // Stiffness for orientation components of left arm
-    double D_left_arm_translation = 50.0; // Damping for translation components of left arm
-    double D_left_arm_orientation = 6.0; // Damping for orientation components of left arm
+    double K_left_arm_translation = ratioStiffnessTask * 400; // Stiffness for translation components of left arm (default: 625)
+    double K_left_arm_orientation = 16.0; // Stiffness for orientation components of left arm (default: 9.0)
+    double D_left_arm_translation = ratioDampingTask * 50.0; // Damping for translation components of left arm (default: 50)
+    double D_left_arm_orientation = 8.0; // Damping for orientation components of left arm (default: 6.0)
 
     // Combine stiffness and damping for right and left arms into one matrix
-    MatrixXd K_task_arms = MatrixXd::Zero(12, 12);
-    K_task_arms.block<3, 3>(0, 0) = Matrix3d::Identity() * K_right_arm_translation;
-    K_task_arms.block<3, 3>(3, 3) = Matrix3d::Identity() * K_right_arm_orientation;
-    K_task_arms.block<3, 3>(6, 6) = Matrix3d::Identity() * K_left_arm_translation;
-    K_task_arms.block<3, 3>(9, 9) = Matrix3d::Identity() * K_left_arm_orientation;
+    MatrixXd K_task = MatrixXd::Zero(12, 12);
+    K_task.block<3, 3>(0, 0) = Matrix3d::Identity() * K_right_arm_translation;
+    K_task.block<3, 3>(3, 3) = Matrix3d::Identity() * K_right_arm_orientation;
+    K_task.block<3, 3>(6, 6) = Matrix3d::Identity() * K_left_arm_translation;
+    K_task.block<3, 3>(9, 9) = Matrix3d::Identity() * K_left_arm_orientation;
 
-    MatrixXd D_task_arms = MatrixXd::Zero(12, 12);
-    D_task_arms.block<3, 3>(0, 0) = Matrix3d::Identity() * D_right_arm_translation;
-    D_task_arms.block<3, 3>(3, 3) = Matrix3d::Identity() * D_right_arm_orientation;
-    D_task_arms.block<3, 3>(6, 6) = Matrix3d::Identity() * D_left_arm_translation;
-    D_task_arms.block<3, 3>(9, 9) = Matrix3d::Identity() * D_left_arm_orientation;
+    MatrixXd D_task = MatrixXd::Zero(12, 12);
+    D_task.block<3, 3>(0, 0) = Matrix3d::Identity() * D_right_arm_translation;
+    D_task.block<3, 3>(3, 3) = Matrix3d::Identity() * D_right_arm_orientation;
+    D_task.block<3, 3>(6, 6) = Matrix3d::Identity() * D_left_arm_translation;
+    D_task.block<3, 3>(9, 9) = Matrix3d::Identity() * D_left_arm_orientation;
 
     // Base, right arm, and left arm gains
-    double K_null_base = 10.0; // Gain for the base
-    double D_null_base = 60.0; // Damping for the base
-    double K_null_right_arm = 1.0; // Gain for the right arm
-    double K_null_left_arm = 1.0; // Gain for the left arm
-    double D_null_right_arm = 1.0; // Damping for the right arm
-    double D_null_left_arm = 1.0; // Damping for the left arm
+    double K_null_base = 5.0; // Gain for the base (default: 3.0)
+    double D_null_base = 80.0; // Damping for the base (default: 60.0)
+    double I_null_base = 0.0; // Integrator for the base (default: 2.0)
+    double K_null_right_arm = ratioStiffnessNull * 4.0; // Gain for the right arm (default: 1.0)
+    double K_null_left_arm = ratioStiffnessNull * 4.0; // Gain for the left arm (default: 1.0)
+    double D_null_right_arm = ratioDampingNull * 4.0; // Damping for the right arm (default: 1.0)
+    double D_null_left_arm = ratioDampingNull * 4.0; // Damping for the left arm (default: 1.0)
+    double I_null_right_arm = 0.0; // Integrator for the right arm (default: 0.0)
+    double I_null_left_arm = 0.0; // Integrator for the left arm (default: 0.0)
 
     // Diagonal matrices for K_null and D_null
     MatrixXd K_null = MatrixXd::Zero(17, 17);
     K_null.diagonal() << VectorXd::Constant(3, K_null_base), VectorXd::Constant(7, K_null_right_arm), VectorXd::Constant(7, K_null_left_arm);
     MatrixXd D_null = MatrixXd::Zero(17, 17);
     D_null.diagonal() << VectorXd::Constant(3, D_null_base), VectorXd::Constant(7, D_null_right_arm), VectorXd::Constant(7, D_null_left_arm);
+    MatrixXd I_null = MatrixXd::Zero(17, 17);
+    I_null.diagonal() << VectorXd::Constant(3, I_null_base), VectorXd::Constant(7, I_null_right_arm), VectorXd::Constant(7, I_null_left_arm);
 
-    // Dynamics matrices
+    // Compute whole body task-space pose/twist and null-space vecotrs
+    VectorXd X_right = pose_arm(Q, 7, true);
+    VectorXd X_left = pose_arm(Q, 7, false);
+    VectorXd X(12);
+    X.segment(0,6) = X_right;
+    X.segment(6,6) = X_left;
+    // Compute whole body Jacobian for right and left arm
+    MatrixXd Jwb_right = JacobianWholeBody(Q, 7, true);
+    MatrixXd Jwb_left = JacobianWholeBody(Q, 7, false);
+    // Compute Xdot for both arms and concatenate
+    VectorXd Xdot_right = Jwb_right * Qdot;
+    VectorXd Xdot_left = Jwb_left * Qdot;
+    VectorXd Xdot(12), Xdot_task(12);
+    Xdot.segment(0,6) = Xdot_right;
+    Xdot.segment(6,6) = Xdot_left;
+    Xdot_task.setZero();
+
+    // Compute whole body dynamics  model for the model based control.
     MatrixXd M(17, 17);
     MatrixXd C(17, 17);
     VectorXd G(17);
-
-    // Compute sub-tasks
-    VectorXd tau_qlim(17);
-    tau_qlim << 0.0,0.0,0.0,-JointLimitPotentialGradient(Q,true),-JointLimitPotentialGradient(Q,false);  // apply on right and left arm. no influence on the base
-    VectorXd tau_manipulability(17);
-    tau_manipulability.setZero();
-    //tau_manipulability << 0.0,0.0,0.0,-ManipulabilityGradient(Q,true),-ManipulabilityGradient(Q,false);  // apply on right and left arm. no influence on the base
-    VectorXd tau_collision_avoidance(17);
-    tau_collision_avoidance.setZero();
-    //tau_collision_avoidance << 0.0,0.0,0.0,-CollisionAvoidanceGradient(Q,true),-CollisionAvoidanceGradient(Q,false);  // apply on right and left arm. no influence on the base
-    
-    // compute null-space torques
-    MatrixXd Qdot_null = MatrixXd::Zero(17, 1);
-    VectorXd tau_null = K_null * (Q_null - Q) + D_null * (Qdot_null - Qdot) + tau_manipulability;
-
-    // Adjustable gains for simulating disturbances in x and theta directions
-    double gain_x = -20.0; // Gain for disturbance in the x direction
-    double gain_theta = -20.0; // Gain for disturbance in the theta direction
-    double now_start = 20.0;
-
-    VectorXd tau_ext = VectorXd::Zero(17); // Initialize tau_ext with zeros
-
-    // Apply disturbance torques in the x and theta directions based on current time and adjustable gains
-    tau_ext(0) = (currentTime > now_start && currentTime <= now_start + 2.5) ? gain_x : // Apply +gain_x from 20 to 22.5 seconds as disturbance in x
-                (currentTime > now_start + 2.5 && currentTime <= now_start + 5.0) ? -gain_x : 0; // Apply -gain_x from 22.5 to 25 seconds as disturbance in x
-
-    tau_ext(2) = (currentTime > now_start + 10 && currentTime <= now_start + 12.5) ? gain_theta : // Apply +gain_theta from 30 to 32.5 seconds as disturbance in theta
-                (currentTime > now_start + 12.5 && currentTime <= now_start + 15.0) ? -gain_theta : 0; // Apply -gain_theta from 32.5 to 35 seconds as disturbance in theta
-
-    // Assuming computeDynamics, JacobianWholeBody, and pose_arm are defined elsewhere
+    // Compute whole body dynamics for mobile system without nonholonomic constraint. 
     computeDynamics(Q, Qdot, M, C, G); // Compute dynamics
 
-    // Constraint matrix A and its derivative
+    // Compute reduced order dynamics
     MatrixXd A(1, 17); // Nonholonomic constraint matrix
     A << -sin(Q(2)), cos(Q(2)), 0, MatrixXd::Zero(1, 14);
     MatrixXd Adot(1, 17); // Derivative of A
     Adot << -Qdot(2) * cos(Q(2)), -Qdot(2) * sin(Q(2)), 0, MatrixXd::Zero(1, 14);
 
-    // Auxiliary and arbitrary matrix D to make a non-singular square constraint matrix and its derivative
+    // Computations for reduced order dynamics with the nonholonimic constraint
     MatrixXd D = MatrixXd::Zero(16, 17);
     D.block(0, 0, 1, 3) << cos(Q(2)), sin(Q(2)), 0;
     D.block(1, 2, 15, 15) = MatrixXd::Identity(15, 15);
@@ -728,104 +724,162 @@ ControlOutput wholeBodyController(const VectorXd& X_task, const VectorXd& Q_null
     inverse_A_D.setZero();
     inverse_A_D.block(0, 0, 2, 2) << -sin(Q(2)), cos(Q(2)), cos(Q(2)), sin(Q(2));
     inverse_A_D.block(2, 2, 15, 15) = MatrixXd::Identity(15, 15);
-
-    // Extract E and F from the inverse of A_D
-    VectorXd E = inverse_A_D.col(0);
+    VectorXd E = inverse_A_D.col(0);  // Extract E and F from the inverse of A_D
     MatrixXd F = inverse_A_D.rightCols(16);
+    VectorXd v = D * Qdot;  // Pseudo velocities
+    // watch this video to learn how to drive these equations:
+    //  https://www.youtube.com/watch?v=C1cb03fYkxk
 
-    // Pseudo velocities
-    VectorXd v = D * Qdot;
-
-    // Compute whole body Jacobian for right and left arm
-    MatrixXd Jwb_right = JacobianWholeBody(Q, 7, true);
-    MatrixXd Jwb_left = JacobianWholeBody(Q, 7, false);
-
-    // Reduced Jacobian for combined arms
-    MatrixXd Jreduced(12, 16);
+    // Compute reduced order Jacobians and Mass
+    MatrixXd Jreduced = MatrixXd::Zero(12, 16);
     Jreduced.block(0, 0, 6, 16) = Jwb_right * F;
     Jreduced.block(6, 0, 6, 16) = Jwb_left * F;
-
-    // Define controller variables 
-    VectorXd tau_wb(17);
-    static VectorXd v_wb(16);
-    static MatrixXd prev_Jreduced; // Static variable to store Jreduced from the previous call
-    static VectorXd Xdot_prev(12);
-    static double prev_time = -1; // Static variable to store the time of the previous call
     MatrixXd Jdot_reduced = MatrixXd::Zero(12, 16); // Variable to store the computed rate of change of Jreduced
-    double deltaTime;
 
-    // Check if prev_time is initialized
-    if (prev_time >= 0) {
+    // Reduced mass matrix and its inverse
+    MatrixXd M_reduced = F.transpose() * M * F;
+    MatrixXd M_reduced_inv = M_reduced.inverse();
+    MatrixXd JreducedT = Jreduced.transpose();
+    MatrixXd lambda = Jreduced * M_reduced_inv * JreducedT;  // auxilary parameter that stors the inverse of Mc
+    MatrixXd M_task = (lambda).inverse(); // Compute cartesian mass that decouples the dynamics of null space with task space.
+    MatrixXd Jr_plus_M = M_reduced_inv * JreducedT * M_task;  // Compute weighted pseudo-inverse
+    // MatrixXd Jr_plus = JreducedT * (Jreduced * JreducedT).inverse(); // Compute pseudo-inverse of Jreduced
+
+    // Define variables
+    double deltaTime;
+    static double prev_time = -1; // Static variable to store the time of the previous call
+    static VectorXd v_wb = v;
+    static MatrixXd prev_Jreduced = Jreduced; // Static variable to store Jreduced from the previous call
+    static VectorXd tauR_ext = VectorXd::Zero(16);
+    static VectorXd F_ext = VectorXd::Zero(12);
+    static VectorXd moIntegral = VectorXd::Zero(16);
+    static VectorXd residual = VectorXd::Zero(16);
+    static MatrixXd prev_M = M;
+
+    if (prev_time >= 0) { // Check if prev_time is initialized
         deltaTime = currentTime - prev_time;
         Jdot_reduced = (Jreduced - prev_Jreduced) / deltaTime;
     }
     else
     {
-        tau_wb.setZero(); // Initialize tau_wb
-        v_wb  = v; // Initialize v_wb
-        Xdot_prev.setZero();
+        Jdot_reduced = MatrixXd::Zero(12, 16);
+    }
+    prev_Jreduced = Jreduced;  // Update the previous variables for the next call
+
+    // Compute Force Controller in Task Space    
+    // Compute Force Control
+    VectorXd F_frc_ff(12);
+    VectorXd F_pid(12);
+    double Kf_p = 0.5;
+    double Kf_d = 0.0;
+    double Kf_i = 0.0;
+    
+    F_pid << Kf_p * (F_d - F_ext);
+    F_frc_ff << F_pid + F_d + K_task*(X_task - X);
+    
+    // Zero out elements not in force_dir (assuming setdiff functionality)
+    for (int i = 0; i < F_frc_ff.size(); ++i) {
+        if (delta_frc(i) <= 0.001)  // for small and negative delta values, force control is disabled. 
+        F_frc_ff(i) = 0.0;
     }
 
-    // Update the static variables for the next call
-    prev_Jreduced = Jreduced;
-    prev_time = currentTime;
-
-    VectorXd X_right = pose_arm(Q, 7, true);
-    VectorXd X_left = pose_arm(Q, 7, false);
-
-    // Concatenate X for both arms
-    VectorXd X(12);
-    X.segment(0,6) = X_right;
-    X.segment(6,6) = X_left;
-
-    // Compute Xdot for both arms and concatenate
-    VectorXd Xdot_right = Jwb_right * Qdot;
-    VectorXd Xdot_left = Jwb_left * Qdot;
-    VectorXd Xdot(12), Xdot_task(12);
-    Xdot.segment(0,6) = Xdot_right;
-    Xdot.segment(6,6) = Xdot_left;
-    Xdot_task.setZero();
-    VectorXd error_task = K_task_arms * (X_task - X) + D_task_arms * (Xdot_task - Xdot);
-
-    VectorXd u_task(16, 1);
-    VectorXd u_null(16, 1);
-    VectorXd u(16,1);
-    u_task.setZero();
-    u_null.setZero();
-    u.setZero();
-
-    // Reduced mass matrix and its inverse
-    MatrixXd M_reduced = F.transpose() * M * F;
-    MatrixXd M_reduced_inv = M_reduced.inverse();
-
-    for (int arm_id = 0; arm_id < 2; ++arm_id) {
-        MatrixXd Jr = Jreduced.block(6 * arm_id, 0, 6, 16);
-        MatrixXd Jd_r = Jdot_reduced.block(6 * arm_id, 0, 6, 16);
-        MatrixXd JrT = Jr.transpose();
-        MatrixXd lambda = Jr * M_reduced_inv * JrT;  // auxilary parameter that stors the inverse of Mc
-        MatrixXd Mc = (lambda).inverse(); // Compute cartesian mass that decouples the dynamics of null space with task space.
-        
-        // MatrixXd Jr_plus = JrT * (Jr * JrT).inverse(); // Compute pseudo-inverse of Jr
-        MatrixXd Jr_plus_M = M_reduced_inv * JrT * Mc;  // Compute weighted pseudo-inverse
-        
-
-        VectorXd F_task = lambda * (error_task.segment(arm_id*6,6));
-        u_task += M_reduced * Jr_plus_M * (F_task - Jd_r * v);
-
-        MatrixXd Nr = MatrixXd::Identity(16, 16) - Jr_plus_M * Jr;
-        u_null += Nr.transpose() * F.transpose() * (tau_null);
+    // Contact-loss stabilization
+    VectorXd X_tilde = X_task - X; // Compute the error vector
+    VectorXd rho_frc = VectorXd::Ones(F_frc_ff.size()); // Initialize rho_frc as a vector of ones (default case)
+    
+    for (int i = 0; i < F_frc_ff.size(); ++i) {
+        if (abs(X_tilde(i)) >= 2 * delta_frc(i)) { // Condition 1: Set rho_frc to 0 where abs(X_tilde) > 2 * delta_frc
+            rho_frc(i) = 0;
+        }
+        else if (delta_frc(i) <= abs(X_tilde(i)) && abs(X_tilde(i)) <= 2 * delta_frc(i)) { // Condition 2: Apply cosine function where 0 < X_tilde <= 2 * delta_frc
+            rho_frc(i) = 0.5 * (1 + cos(M_PI * (X_tilde(i) / delta_frc(i) - 1)));
+        }
+        else
+        {
+            rho_frc(i) = 1.0;
+        }
     }
+    
+    // Convert to diagonal matrix
+    MatrixXd rho_frc_diag = rho_frc.asDiagonal();
+    
+    // Compute final force control output
+    VectorXd F_frc_rho = rho_frc_diag *F_frc_ff;
+    VectorXd a_frc_rho = -lambda * (F_frc_rho);
+    VectorXd u_frc_rho = M_reduced*Jr_plus_M*(a_frc_rho);
 
-    u << u_task + u_null;
-    MatrixXd F_p_pseudo = F * (F.transpose() * F).inverse();
-    tau_wb = (C * Qdot - M * (E * Adot + F * Ddot) * F * v) + F_p_pseudo * u + tau_qlim + tau_collision_avoidance + tau_ext;   // the robot arm has its own gravity compensation and thus no need to add as feedforward term here.
+    // Compute null space control torque command
+    MatrixXd Nr = MatrixXd::Identity(16, 16) - Jr_plus_M * Jreduced;
+    // Compute null space torques:
+    VectorXd tau_pid = K_null * (Q_null - Q) - D_null * (Qdot);
+    VectorXd tau_qlim(17);
+    tau_qlim << 0.0,0.0,0.0,-JointLimitPotentialGradient(Q,true),-JointLimitPotentialGradient(Q,false);  // apply on right and left arm. no influence on the base
+    VectorXd tau_sa(17);
+    //tau_sa << 0.0,0.0,0.0,-SingularityAvoidanceGradient(Q,true),-SingularityAvoidanceGradient(Q,false);  // apply on right and left arm. no influence on the base
+    tau_sa.setZero();
+    VectorXd tau_ca(17);
+    //tau_ca << 0.0,0.0,0.0,-CollisionAvoidanceGradient(Q,true),-CollisionAvoidanceGradient(Q,false);  // apply on right and left arm. no influence on the base
+    tau_ca.setZero();
+    VectorXd tau_null = tau_pid + tau_qlim + tau_sa + tau_ca;
+    VectorXd u_null = M_reduced * Nr * F.transpose() * ((M).inverse() * tau_null);
 
-    VectorXd vdot = M_reduced_inv * (u + F.transpose() * (tau_qlim + tau_collision_avoidance + tau_ext));
-    v_wb = v_wb + deltaTime*vdot;
+    // Compute task space control torque command
+    VectorXd F_imp = K_task * (X_task - X) + D_task * (Xdot_task - Xdot);
+    VectorXd a_task = lambda * (F_imp);
+    VectorXd a_tauExt = -Jreduced*M_reduced_inv*tauR_ext;  // add this to u_task if you want to have disturbance rejection. Note: It doesn't work fine and is close to unstability!
+    VectorXd u_task = M_reduced*Jr_plus_M*(a_task - Jdot_reduced*v);
 
+    // Simulating disturbances in x and theta directions
+    double gain_x = -0.0; // -18.0 Gain for disturbance in the x direction
+    double gain_theta = 0.0; // 14.0 Gain for disturbance in the theta direction
+    double now_start = 0.0;  // 7.0
+
+    VectorXd tauR_Ext_virtual = VectorXd::Zero(16); // Initialize tauR_Ext_virtual with zeros
+    // Apply disturbance torques in the x and theta directions based on current time and adjustable gains
+    tauR_Ext_virtual(0) = (currentTime > now_start && currentTime <= now_start + 2.5) ? gain_x : // Apply +gain_x from 20 to 22.5 seconds as disturbance in x
+                (currentTime > now_start + 2.5 && currentTime <= now_start + 5.0) ? -gain_x : 0; // Apply -gain_x from 22.5 to 25 seconds as disturbance in x
+
+    tauR_Ext_virtual(1) = (currentTime > now_start + 7.5 && currentTime <= now_start + 10.0) ? gain_theta : // Apply +gain_theta from 30 to 32.5 seconds as disturbance in theta
+    (currentTime > now_start + 10.0 && currentTime <= now_start + 12.5) ? -gain_theta : 0; // Apply -gain_theta from 32.5 to 35 seconds as disturbance in theta
+
+    // Compute whole body torque control command
+    VectorXd u = u_task + u_null + u_frc_rho + tauR_Ext_virtual; // tauR_Ext_virtual for demo
+    VectorXd tauR_wb = F.transpose() * (C * Qdot - M * (E * Adot + F * Ddot) * F * v) + u;  //tauR_Ext for demo // the robot arm has its own gravity compensation and thus no need to add as feedforward term here.
+
+    // VectorXd vdot = M_reduced_inv * (u); 
+    VectorXd vdot = M_reduced_inv * (u); 
+    v_wb = v_wb + deltaTime*vdot + 0.005*(v-v_wb);
+    
+    // Momentum Observer
+    double KI = 5.0;
+    VectorXd tauR_mes(16);
+    tauR_mes << tauR_wb(0), tauR_wb(1), tau_mes.segment(3,14);
+
+    VectorXd tauR_ext_bias(16);
+    tauR_ext_bias << 0.0, 0.0, 0.0, -1.5535, -2.1778, 7.9396, 0.2965, -0.7246, -0.5442, 11.2854, -4.5143, 5.4729, 4.8297, 2.1539, -1.1199, 0.2910;
+    if (prev_time >= 0.0) { // Check if prev_time is initialized
+        MatrixXd Mdot = (M - prev_M) / deltaTime;
+        MatrixXd Momentum = M_reduced * v;
+        residual = KI * (Momentum - moIntegral);
+        moIntegral += deltaTime*(tauR_mes + F.transpose()*(Mdot - (E*Adot + F*Ddot).transpose()*M.transpose())*F*v -F.transpose()*G + residual);
+        tauR_ext = residual - tauR_ext_bias;
+    }    
+    prev_M = M;  // update the previous mass matrix for the next cycle. 
+
+    // Map external toquese to external forces
+    MatrixXd J_right = JacobArm(Q,7,true);
+    MatrixXd J_left = JacobArm(Q,7,false);
+    MatrixXd J_plus_right = J_right.transpose() * (J_right * J_right.transpose()).inverse();
+    MatrixXd J_plus_left = J_left.transpose() * (J_left * J_left.transpose()).inverse();
+    F_ext <<  J_plus_right.transpose() * tauR_ext.segment(2, 7) , J_plus_left.transpose() * tauR_ext.segment(9, 7);  // F_ext for right/left arm
+    
     ControlOutput output;
-    output.tau_wb = tau_wb;  // for torque based control
+    output.tauR_wb = tauR_wb;  // for torque based control
     output.v_wb = v_wb; // for velocity based control
-
+    output.tauR_ext = tauR_ext;
+    output.F_ext = F_ext;
+    prev_time = currentTime;
+    
     return output;
 }
+
